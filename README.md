@@ -9,7 +9,7 @@ A fast, small desktop database client that works and looks good. It starts with 
 - Small and quick: a ~10–15 MB app that starts in under a second (Tauri, not Electron).
 - Keyboard-first and always dark mode.
 - Exact types: decimals, big integers, JSON and timestamps are never rounded or reformatted on the way to the screen.
-- Safe by default: confirmation for destructive statements, per-connection read-only mode, passwords only in the OS keychain.
+- Safe by default: a confirmation prompt for destructive statements, passwords only in the OS keychain. The database itself decides what is allowed.
 
 See [PLAN.md](PLAN.md) for the full plan, architecture and roadmap.
 

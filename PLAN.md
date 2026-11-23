@@ -89,7 +89,7 @@ Rules:
 - Paste a connection URL (`postgres://…`, `mysql://…`).
 - Timeouts, keepalive, graceful auto-reconnect.
 - One dedicated connection per editor tab (transactions/session state); separate pool for schema browsing.
-- Read-only mode and environment color tags (red = prod).
+- No app-side read-only mode and no environment color tags (see §12).
 - Works with managed/cloud-hosted databases (TLS and SSH tunnel support). Target services: AWS RDS/Aurora, Google Cloud SQL, Azure Database, Neon, Supabase, PlanetScale.
 
 ## 7. Flavor and test matrix
@@ -120,7 +120,7 @@ TLS modes and certificates, SSH tunnels and jump hosts, keepalive/reconnect, the
 Lazy schema tree; multi-tab editor (⌘Enter run selection, cancel, history); table browser with server-side sort/filter/pagination; export CSV/JSON/SQL.
 
 **Phase 3 — Editing and safety (2 wk)**
-Inline edit/insert/delete by primary key with staged-changes SQL preview; explicit transactions; prod safeguards; DDL viewer; structure and index view.
+Inline edit/insert/delete by primary key with staged-changes SQL preview; explicit transactions; confirmation prompts for destructive statements; DDL viewer; structure and index view.
 
 **Phase 4 — Power features (3+ wk)**
 Schema-aware autocomplete; EXPLAIN visualizer; ER diagram; CSV import; saved queries; DB-to-DB copy.
@@ -153,7 +153,11 @@ Code signing/notarization (macOS), MSI/NSIS (Windows), AppImage/deb (Linux), aut
 - **Webview hardening:** strict CSP (set in `tauri.conf.json`; `devCsp` is looser only for Vite HMR). No `dangerouslySetInnerHTML` and no `eval`; cell values, error messages and schema names are always rendered as text.
 - **Tauri permissions:** capabilities grant only what the UI needs (currently `core:default`). Review every new command and plugin; no shell, no broad filesystem access.
 - **Connections:** local and Docker may skip TLS. Remote connections default to verified TLS. SSH tunnels must check host keys (known-hosts, trust-on-first-use prompt, warn on change). No silent downgrade from verified to unverified.
-- **Query safety:** confirm destructive statements (DELETE/UPDATE without WHERE, DROP, TRUNCATE); per-connection read-only mode; prod color tags; edits only by primary key with a SQL preview. User SQL runs as written; we never build SQL by string-pasting values (use parameters or explicit casts).
+- **The database enforces permissions.** Rowlark does not parse SQL, block statements or keep its own permission model. It runs what the user types and shows the server's result or error (for example "permission denied for table orders"). Optionally it may ask the server what privileges the user has (`has_table_privilege` on Postgres, `SHOW GRANTS` on MySQL) to grey out editing, but the server stays the authority.
+- **No read-only mode in Rowlark.** For a connection that must not write, the user connects with a database user that only has `SELECT` (or whatever privileges they choose). The new-connection dialog may say so. This keeps one source of truth: the server's privileges.
+- **One app-side guard: a Confirm | Cancel prompt** before DROP, TRUNCATE and DELETE/UPDATE without WHERE. It is a prompt only. It never blocks, and the server still decides whether the statement may run.
+- **Edits and SQL generation:** edits go by primary key with a SQL preview; values are sent with an explicit cast and never built by pasting strings into SQL (use parameters or casts).
+- **No environment color tags** (no prod/staging/local dots or colors).
 - **Local data:** saved connections and query history live in SQLite. Add a "don't record history" option and a retention limit; history may contain sensitive literals. Exports are written only where the user chooses.
 - **Supply chain:** CI runs `npm audit` and `cargo audit`; commit lockfiles; add dependencies only with a reason; pin the Rust toolchain.
 - **Release (Phase 5):** code signing and notarization; signed auto-updates (updater keys kept offline); publish checksums.

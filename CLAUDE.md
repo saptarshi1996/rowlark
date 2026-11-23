@@ -23,7 +23,8 @@ Strong in JavaScript/TypeScript, new to Rust. So:
 - **Drivers:** the UI only talks to the `Driver` trait and normalized model. Dialect and flavor quirks (MariaDB vs MySQL) stay inside drivers.
 - **Secrets:** passwords only in the OS keychain (`keyring`), never in config files, logs or the local SQLite store.
 - **Webview security:** keep the strict CSP in `tauri.conf.json`; never `dangerouslySetInnerHTML` or `eval`; render DB values and errors as text only; grant new Tauri capabilities sparingly. See PLAN.md §12.
-- **Safety:** destructive actions (DELETE/UPDATE without WHERE, DROP) need confirmation; respect per-connection read-only mode.
+- **Permissions and safety:** the database enforces permissions, not Rowlark. Never parse SQL to allow or block it, and never add app-side permission checks; run what the user types and show the server's answer or error. There is no read-only mode in Rowlark; to get one, the user connects with a database user that only has the privileges they want. The one app-side guard is a Confirm | Cancel prompt before DROP, TRUNCATE and DELETE/UPDATE without WHERE. It is a prompt only and never blocks.
+- **No environment color tags:** no prod/staging/local dots or colors anywhere in the UI.
 - **Platforms:** macOS first; Windows and Linux come later. Don't spend time on them yet, but nothing macOS-only unless gated by `cfg`. Avoid bleeding-edge web APIs (Linux WebKitGTK is the weakest webview).
 - **Theme:** dark mode only, permanently. Use the CSS variables in `src/index.css`; no light theme or toggle.
 - **License:** intentionally none for now (public, view-only). Don't add a LICENSE file or `license` fields until the owner decides.
