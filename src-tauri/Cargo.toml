@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Rowlark: a fast, small, open-source database client"
 authors = ["Rowlark contributors"]
 edition = "2024"
-license = "MIT"
 
 [lib]
 # The `_lib` suffix is needed to keep the lib name distinct from the bin name
