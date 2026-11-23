@@ -9,10 +9,10 @@ Strong in JavaScript/TypeScript, new to Rust. So:
 - Put product logic in TypeScript, not Rust.
 - When Rust errors or concepts come up, explain them briefly in plain terms.
 
-## Layout (target)
+## Layout
 
 - `crates/core`: drivers, `Value` enum, SSH, streaming. No Tauri or UI deps.
-- `crates/app` (or `src-tauri`): Tauri commands; thin wrappers over `core`.
+- `src-tauri`: Tauri app crate; commands are thin wrappers over `core`.
 - `src/`: React + TypeScript UI.
 - `docker-compose.yml`: Postgres 14–17, MySQL 5.7/8/9, MariaDB test servers.
 
@@ -23,15 +23,19 @@ Strong in JavaScript/TypeScript, new to Rust. So:
 - **Drivers:** the UI only talks to the `Driver` trait and normalized model. Dialect and flavor quirks (MariaDB vs MySQL) stay inside drivers.
 - **Secrets:** passwords only in the OS keychain (`keyring`), never in config files, logs or the local SQLite store.
 - **Safety:** destructive actions (DELETE/UPDATE without WHERE, DROP) need confirmation; respect per-connection read-only mode.
-- **Cross-platform:** nothing macOS-only unless gated by `cfg`. Avoid bleeding-edge web APIs (Linux WebKitGTK is the weakest webview).
+- **Platforms:** macOS first; Windows and Linux come later. Don't spend time on them yet, but nothing macOS-only unless gated by `cfg`. Avoid bleeding-edge web APIs (Linux WebKitGTK is the weakest webview).
+- **Theme:** dark mode only, permanently. Use the CSS variables in `src/index.css`; no light theme or toggle.
+- **License:** intentionally none for now (public, view-only). Don't add a LICENSE file or `license` fields until the owner decides.
 - Order of work: `Value` + `Driver` + Docker tests first, UI after. New drivers or types need golden tests.
 
-## Commands (fill in as the scaffold lands)
+## Commands
 
 - Dev: `npm run tauri dev`
 - Build: `npm run tauri build`
 - Rust tests: `cargo test --workspace`
-- Test DBs: `docker compose up -d`
+- Test DBs: `docker compose up -d` (needs Docker or Colima running; with Colima the compose plugin may need registering)
+- Rust format/lint: `cargo fmt --all` / `cargo clippy --workspace --all-targets -- -D warnings`
+- Rust is pinned in `rust-toolchain.toml` (rustup installs it automatically)
 - Frontend lint/typecheck: `npm run lint` / `npm run typecheck`
 
 ## Conventions

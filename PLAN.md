@@ -22,7 +22,8 @@ Goal: a polished, keyboard-first client that is free, open source, ~10–15 MB, 
 | SQL editor | CodeMirror 6 |
 | Platforms | macOS first (current focus); Windows and Linux later, still the long-term goal |
 | First engines | PostgreSQL, MySQL, MariaDB (variant of MySQL) |
-| License | MIT or Apache-2.0 (decide before first public push) |
+| License | None for now: repo is public but view-only (all rights reserved). Decide later |
+| Theme | Dark mode only, permanently. No light theme |
 
 Owner profile: strong in JavaScript, new to Rust. So **keep Rust thin and well commented; keep product logic in TypeScript.**
 
@@ -38,7 +39,7 @@ Owner profile: strong in JavaScript, new to Rust. So **keep Rust thin and well c
 │    ├─ PostgresDriver  (tokio-postgres)                           │
 │    └─ MySqlDriver     (mysql_async)                              │
 │   Value enum │ SSH tunnel (russh) │ Keychain (keyring)           │
-│ crates/app: Tauri commands, thin wrappers over core              │
+│ src-tauri: Tauri commands, thin wrappers over core               │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -94,8 +95,8 @@ Rules:
 ## 7. Flavor and test matrix
 
 - On connect, run `SELECT VERSION()` and store `Flavor::{Postgres, MySql, MariaDb}` plus version. Keep quirks (information_schema differences, JSON-as-LONGTEXT in MariaDB, etc.) inside the driver.
-- `docker-compose.yml`: Postgres 14–17, MySQL 5.7/8/9, MariaDB 10/11, each on its own port.
-- The same integration suite runs against every service. CI runs it on Linux.
+- `docker-compose.yml`: Postgres 14–17, MySQL 5.7/8/9, MariaDB 11, each on its own port (add MariaDB 10 later if needed).
+- The same integration suite runs against every service. Locally it uses Docker (Colima works). CI is macOS-only for now (macOS runners have no Docker), so the DB suite runs locally only until Linux returns (see open questions).
 
 ## 8. Cross-platform notes
 
@@ -107,7 +108,7 @@ Rules:
 ## 9. Roadmap
 
 **Phase 0 — Setup (2–3 days)**
-Tauri 2 + React + TS + Vite; Rust workspace (`core`, `app`); CI matrix; `docker-compose.yml`.
+Tauri 2 + React + TS + Vite; Rust workspace (`crates/core`, `src-tauri`); CI matrix; `docker-compose.yml`.
 
 **Phase 1 — Types, drivers, connect and query (1–2 wk)**
 `Value`, `Driver` trait, streaming API **before any UI**; Postgres + MySQL drivers; golden type tests passing against the Docker test databases; connection manager for **local/Docker** connections (host, port, user, password, URL paste, test connection, keychain); run a query and stream rows into the grid.
@@ -138,6 +139,7 @@ Code signing/notarization (macOS), MSI/NSIS (Windows), AppImage/deb (Linux), aut
 
 ## 11. Open questions
 
-- License: MIT vs Apache-2.0.
+- License: none for now (view-only). Pick one before inviting use or contributions.
+- CI for the DB tests: deferred. macOS only, no Linux or Windows jobs, so the Docker-based DB suite runs locally only. Revisit when Linux comes back.
 - Verify the name "Rowlark" on GitHub/web/app stores before going public.
 - Package manager: npm (installed) vs pnpm.

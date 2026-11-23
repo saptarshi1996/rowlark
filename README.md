@@ -54,7 +54,8 @@ cargo test --workspace                            # Rust tests
 `docker-compose.yml` starts PostgreSQL 14–17, MySQL 5.7/8/9 and MariaDB 11 for driver tests. Each server has its own host port. Credentials are dev-only: user, password and database are `rowlark` / `rowlark` / `rowlark_test`.
 
 ```sh
-docker compose up -d              # all servers
+docker compose up -d              # all servers (Colima users: if `docker compose` is not found,
+                                  # link the compose plugin into ~/.docker/cli-plugins or use `docker-compose`)
 docker compose up -d postgres16   # just one
 docker compose down
 ```
