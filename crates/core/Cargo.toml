@@ -1,0 +1,8 @@
+[package]
+name = "rowlark-core"
+version = "0.1.0"
+description = "Rowlark core: drivers, Value type, streaming. No Tauri or UI dependencies."
+edition = "2024"
+license = "MIT"
+
+[dependencies]

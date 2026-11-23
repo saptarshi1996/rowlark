@@ -1,0 +1,20 @@
+[package]
+name = "rowlark"
+version = "0.1.0"
+description = "Rowlark: a fast, small, open-source database client"
+authors = ["Rowlark contributors"]
+edition = "2024"
+license = "MIT"
+
+[lib]
+# The `_lib` suffix is needed to keep the lib name distinct from the bin name
+# (otherwise Windows builds can clash). Tauri's template uses this convention.
+name = "rowlark_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+rowlark-core = { path = "../crates/core" }
+tauri = { version = "2", features = [] }

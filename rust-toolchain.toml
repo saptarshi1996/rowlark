@@ -1,0 +1,6 @@
+# Pins the Rust version for this project (like .nvmrc for Node).
+# rustup reads this automatically and installs/uses this exact version
+# whenever you run cargo inside this folder.
+[toolchain]
+channel = "1.100.0"
+components = ["clippy", "rustfmt"]

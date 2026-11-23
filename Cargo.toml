@@ -1,0 +1,14 @@
+# Cargo workspace root: groups our Rust crates so one `cargo test --workspace`
+# builds and tests everything, and all crates share one `target/` folder.
+[workspace]
+resolver = "2"
+members = ["crates/core", "src-tauri"]
+
+# Release profile lives at the workspace root (Cargo ignores it in member crates).
+# These settings trade slower release builds for a smaller, faster binary.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

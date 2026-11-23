@@ -1,0 +1,75 @@
+# Test databases for Rowlark's driver and golden tests. Dev-only credentials.
+# Start: `docker compose up -d`   Stop: `docker compose down`
+# Each server gets its own host port so they can all run at once.
+#   Postgres 14-17 -> 54314..54317    MySQL 5.7/8/9 -> 33057/33080/33090    MariaDB -> 33106
+# User: rowlark / Password: rowlark / Database: rowlark_test
+
+x-postgres: &postgres
+  environment:
+    POSTGRES_USER: rowlark
+    POSTGRES_PASSWORD: rowlark
+    POSTGRES_DB: rowlark_test
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U rowlark -d rowlark_test"]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+
+x-mysql: &mysql
+  environment:
+    MYSQL_ROOT_PASSWORD: rowlark
+    MYSQL_USER: rowlark
+    MYSQL_PASSWORD: rowlark
+    MYSQL_DATABASE: rowlark_test
+  healthcheck:
+    test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -prowlark --silent"]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+
+services:
+  postgres14:
+    <<: *postgres
+    image: postgres:14
+    ports: ["54314:5432"]
+  postgres15:
+    <<: *postgres
+    image: postgres:15
+    ports: ["54315:5432"]
+  postgres16:
+    <<: *postgres
+    image: postgres:16
+    ports: ["54316:5432"]
+  postgres17:
+    <<: *postgres
+    image: postgres:17
+    ports: ["54317:5432"]
+
+  mysql57:
+    <<: *mysql
+    image: mysql:5.7
+    # No native arm64 image for 5.7, so it runs emulated on Apple Silicon (slower).
+    platform: linux/amd64
+    ports: ["33057:3306"]
+  mysql8:
+    <<: *mysql
+    image: mysql:8.0
+    ports: ["33080:3306"]
+  mysql9:
+    <<: *mysql
+    image: mysql:9
+    ports: ["33090:3306"]
+
+  mariadb:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: rowlark
+      MARIADB_USER: rowlark
+      MARIADB_PASSWORD: rowlark
+      MARIADB_DATABASE: rowlark_test
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    ports: ["33106:3306"]
