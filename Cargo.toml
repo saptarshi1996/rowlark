@@ -1,8 +1,9 @@
 # Cargo workspace root: groups our Rust crates so one `cargo test --workspace`
 # builds and tests everything, and all crates share one `target/` folder.
+# The native UI crate (GPUI) joins this list after the drivers exist (see PLAN.md).
 [workspace]
 resolver = "2"
-members = ["crates/core", "src-tauri"]
+members = ["crates/core"]
 
 # Release profile lives at the workspace root (Cargo ignores it in member crates).
 # These settings trade slower release builds for a smaller, faster binary.

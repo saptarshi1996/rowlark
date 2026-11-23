@@ -1,7 +1,7 @@
 //! Rowlark core library.
 //!
-//! This crate must stay free of Tauri and UI dependencies so it can be tested
-//! on its own. The `Value` enum and the `Driver` trait will live here (Phase 1).
+//! This crate must stay free of UI dependencies so it can be tested on its own
+//! (and so the UI can be swapped without touching the drivers). The `Value` enum and the `Driver` trait will live here (Phase 1).
 
 pub mod value;
 

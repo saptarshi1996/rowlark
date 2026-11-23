@@ -1,11 +1,5 @@
-# Dependencies
-node_modules/
-
 # Build output
-dist/
-dist-ssr/
 target/
-src-tauri/gen/schemas/
 
 # Environment and secrets (never commit these)
 .env
@@ -16,7 +10,6 @@ src-tauri/gen/schemas/
 
 # Logs
 *.log
-npm-debug.log*
 
 # Local overrides
 *.local
@@ -36,4 +29,3 @@ npm-debug.log*
 
 # Test artifacts
 coverage/
-EOF
