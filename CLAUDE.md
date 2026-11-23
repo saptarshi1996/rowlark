@@ -31,7 +31,8 @@ Strong in JavaScript/TypeScript, learning Rust as the project goes. So:
 
 ## Commands
 
-- Rust tests: `cargo test --workspace`
+- Rust tests: `cargo test --workspace` (unit tests only; this is what CI runs)
+- DB tests: `docker compose up -d`, then `cargo test --workspace -- --include-ignored`. Tests that need the Docker servers are marked `#[ignore]` so CI (no Docker) skips them.
 - Test DBs: `docker compose up -d` (needs Docker or Colima running; with Colima the compose plugin may need registering)
 - Rust format/lint: `cargo fmt --all` / `cargo clippy --workspace --all-targets -- -D warnings`
 - Rust is pinned in `rust-toolchain.toml` (rustup installs it automatically)

@@ -22,6 +22,7 @@ Goal: a polished, keyboard-first client that is free, open source, small, and st
 | SQL editor | To decide in the spike (GPUI component editor, tree-sitter highlighting). Autocomplete is built in Rust, schema-aware |
 | Platforms | macOS on Apple Silicon only (the owner's only build/test device); Intel Macs, Windows and Linux later, still the long-term goal |
 | First engines | PostgreSQL, MySQL, MariaDB (variant of MySQL). Drivers are compiled in; no plugin system, more engines are added as new drivers |
+| Database access | **sqlx** (0.8+, tokio runtime) for Postgres and MySQL/MariaDB, one API for both (decided 2026-11-24). Used untyped (`raw_sql`/`query` + column type info), not the compile-time-checked macros, because we run arbitrary user SQL. Cancel is done with a second connection (`pg_cancel_backend(pid)`, `KILL QUERY id`), not a driver feature |
 | License | None for now: repo is public but view-only (all rights reserved). Decide later |
 | Theme | Dark mode only, permanently. No light theme |
 
@@ -37,8 +38,8 @@ Why not Tauri + React (the earlier plan): query rows would cross a Rust → webv
 └────────────────────── plain Rust calls / channels ───────────────┘
 ┌─────────────────────────── crates/core ──────────────────────────┐
 │   trait Driver { connect, query_stream, cancel, introspect, … }  │
-│    ├─ PostgresDriver  (tokio-postgres)                           │
-│    └─ MySqlDriver     (mysql_async)                              │
+│    ├─ PostgresDriver  (sqlx)                                     │
+│    └─ MySqlDriver     (sqlx)                                     │
 │   Value enum │ SSH tunnel (russh) │ Keychain (keyring)           │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -144,7 +145,9 @@ Code signing/notarization (macOS), then Windows and Linux packages, auto-update,
 - [x] `git init`
 - [x] Phase 0 scaffold (Tauri + React, since removed)
 - [x] Decision: fully native Rust UI (2026-11-24); web UI and Tauri shell removed
-- [ ] Phase 1 (`Driver` trait + Postgres/MySQL drivers + Docker + golden tests first, UI after)
+- [x] Phase 1a: `Driver` trait, `PostgresDriver` (connect, ping, streamed `run_query`, `cancel`), golden type round-trip on Postgres 14–17
+- [ ] Phase 1b-prep: Postgres introspection and arrays, then the MySQL/MariaDB driver with the same tests
+- [ ] Remaining Phase 1: connection model + keychain (UI after)
 - [ ] Phase 0b UI spike
 
 ## 11. Open questions

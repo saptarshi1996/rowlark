@@ -5,9 +5,21 @@ description = "Rowlark core: drivers, Value type, streaming. No UI dependencies.
 edition = "2024"
 
 [dependencies]
-# Needed so `Value` can be turned into JSON for the UI (the IPC boundary).
+# Needed so `Value` can be turned into JSON for output and debugging.
 serde = { version = "1", features = ["derive"] }
+# Typed error enums without hand-writing boilerplate.
+thiserror = "2"
+# Database access. default-features = false drops the compile-time query macros
+# (we run arbitrary user SQL, so we cannot use them) and every database we do
+# not support yet. TLS is added in Phase 1b.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres"] }
+# Async runtime pieces used directly: channels (`mpsc`) and an async `Mutex`.
+tokio = { version = "1", features = ["sync"] }
+# `StreamExt::next()` for reading rows one by one from sqlx.
+futures-util = { version = "0.3", default-features = false }
 
 [dev-dependencies]
-# Tests only: lets us assert on the exact JSON the UI will receive.
+# Tests only: lets us assert on the exact JSON a Value produces.
 serde_json = "1"
+# Tests only: `#[tokio::test]`, a multi-threaded runtime, and sleep/timeout.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
