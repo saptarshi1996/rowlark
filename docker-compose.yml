@@ -1,7 +1,7 @@
 # Test databases for Rowlark's driver and golden tests. Dev-only credentials.
 # Start: `docker compose up -d`   Stop: `docker compose down`
 # Each server gets its own host port so they can all run at once.
-#   Postgres 14-17 -> 54314..54317    MySQL 5.7/8/9 -> 33057/33080/33090    MariaDB -> 33106
+#   Postgres 14-17 -> 54314..54317    MySQL 8/9 -> 33080/33090    MariaDB -> 33106
 # User: rowlark / Password: rowlark / Database: rowlark_test
 
 x-postgres: &postgres
@@ -45,12 +45,6 @@ services:
     image: postgres:17
     ports: ["54317:5432"]
 
-  mysql57:
-    <<: *mysql
-    image: mysql:5.7
-    # No native arm64 image for 5.7, so it runs emulated on Apple Silicon (slower).
-    platform: linux/amd64
-    ports: ["33057:3306"]
   mysql8:
     <<: *mysql
     image: mysql:8.0

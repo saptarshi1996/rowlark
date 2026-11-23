@@ -1,6 +1,6 @@
 # Rowlark
 
-A fast, small, open-source desktop database client for **PostgreSQL** and **MySQL/MariaDB**.
+A fast, small desktop database client that works and looks good. It starts with **PostgreSQL** and **MySQL/MariaDB**, with more engines (including NoSQL) planned.
 
 > **Status: early development.** The project scaffold is in place, but there is no database functionality yet. Nothing here is ready to use.
 
@@ -51,7 +51,7 @@ cargo test --workspace                            # Rust tests
 
 ### Test databases
 
-`docker-compose.yml` starts PostgreSQL 14–17, MySQL 5.7/8/9 and MariaDB 11 for driver tests. Each server has its own host port. Credentials are dev-only: user, password and database are `rowlark` / `rowlark` / `rowlark_test`.
+`docker-compose.yml` starts PostgreSQL 14–17, MySQL 8/9 and MariaDB 11 for driver tests. Each server has its own host port. Credentials are dev-only: user, password and database are `rowlark` / `rowlark` / `rowlark_test`.
 
 ```sh
 docker compose up -d              # all servers (Colima users: if `docker compose` is not found,
@@ -60,7 +60,7 @@ docker compose up -d postgres16   # just one
 docker compose down
 ```
 
-MySQL 5.7 has no native arm64 image, so it runs under emulation on Apple Silicon.
+MySQL 5.7 is not included for now: it has no native arm64 image.
 
 ## Contributing
 

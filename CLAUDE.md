@@ -14,7 +14,7 @@ Strong in JavaScript/TypeScript, new to Rust. So:
 - `crates/core`: drivers, `Value` enum, SSH, streaming. No Tauri or UI deps.
 - `src-tauri`: Tauri app crate; commands are thin wrappers over `core`.
 - `src/`: React + TypeScript UI.
-- `docker-compose.yml`: Postgres 14–17, MySQL 5.7/8/9, MariaDB test servers.
+- `docker-compose.yml`: Postgres 14–17, MySQL 8/9, MariaDB test servers.
 
 ## Rules
 
@@ -22,6 +22,7 @@ Strong in JavaScript/TypeScript, new to Rust. So:
 - **Large results:** stream in ~1k-row batches; cap the UI buffer; exports run in Rust, not through the UI; truncate large cells.
 - **Drivers:** the UI only talks to the `Driver` trait and normalized model. Dialect and flavor quirks (MariaDB vs MySQL) stay inside drivers.
 - **Secrets:** passwords only in the OS keychain (`keyring`), never in config files, logs or the local SQLite store.
+- **Webview security:** keep the strict CSP in `tauri.conf.json`; never `dangerouslySetInnerHTML` or `eval`; render DB values and errors as text only; grant new Tauri capabilities sparingly. See PLAN.md §12.
 - **Safety:** destructive actions (DELETE/UPDATE without WHERE, DROP) need confirmation; respect per-connection read-only mode.
 - **Platforms:** macOS first; Windows and Linux come later. Don't spend time on them yet, but nothing macOS-only unless gated by `cfg`. Avoid bleeding-edge web APIs (Linux WebKitGTK is the weakest webview).
 - **Theme:** dark mode only, permanently. Use the CSS variables in `src/index.css`; no light theme or toggle.

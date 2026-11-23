@@ -20,7 +20,7 @@ Goal: a polished, keyboard-first client that is free, open source, ~10–15 MB, 
 | UI | **React + TypeScript + Vite** |
 | Grid | Canvas-based virtualized grid (Glide Data Grid) |
 | SQL editor | CodeMirror 6 |
-| Platforms | macOS first (current focus); Windows and Linux later, still the long-term goal |
+| Platforms | macOS on Apple Silicon only (the owner's only build/test device); Intel Macs, Windows and Linux later, still the long-term goal |
 | First engines | PostgreSQL, MySQL, MariaDB (variant of MySQL) |
 | License | None for now: repo is public but view-only (all rights reserved). Decide later |
 | Theme | Dark mode only, permanently. No light theme |
@@ -95,7 +95,7 @@ Rules:
 ## 7. Flavor and test matrix
 
 - On connect, run `SELECT VERSION()` and store `Flavor::{Postgres, MySql, MariaDb}` plus version. Keep quirks (information_schema differences, JSON-as-LONGTEXT in MariaDB, etc.) inside the driver.
-- `docker-compose.yml`: Postgres 14–17, MySQL 5.7/8/9, MariaDB 11, each on its own port (add MariaDB 10 later if needed).
+- `docker-compose.yml`: Postgres 14–17, MySQL 8/9, MariaDB 11, each on its own port. MySQL 5.7 is dropped for now (no arm64 image, slow under emulation on Apple Silicon); add MariaDB 10 or MySQL 5.7 later if needed.
 - The same integration suite runs against every service. Locally it uses Docker (Colima works). CI is macOS-only for now (macOS runners have no Docker), so the DB suite runs locally only until Linux returns (see open questions).
 
 ## 8. Cross-platform notes
@@ -143,3 +143,20 @@ Code signing/notarization (macOS), MSI/NSIS (Windows), AppImage/deb (Linux), aut
 - CI for the DB tests: deferred. macOS only, no Linux or Windows jobs, so the Docker-based DB suite runs locally only. Revisit when Linux comes back.
 - Verify the name "Rowlark" on GitHub/web/app stores before going public.
 - Package manager: npm (installed) vs pnpm.
+- Encrypt query history and saved connection metadata at rest, or rely on OS disk encryption (FileVault)?
+
+## 12. Security
+
+**Principles:** the database and its data are untrusted input; the webview is a thin UI with the least privilege we can give it; secrets never touch disk in plain text.
+
+- **Secrets:** passwords only in the macOS Keychain (`keyring`). Never in config, logs, SQLite or crash output. Passwords cross IPC once (save) and are never sent back to the UI.
+- **Webview hardening:** strict CSP (set in `tauri.conf.json`; `devCsp` is looser only for Vite HMR). No `dangerouslySetInnerHTML` and no `eval`; cell values, error messages and schema names are always rendered as text.
+- **Tauri permissions:** capabilities grant only what the UI needs (currently `core:default`). Review every new command and plugin; no shell, no broad filesystem access.
+- **Connections:** local and Docker may skip TLS. Remote connections default to verified TLS. SSH tunnels must check host keys (known-hosts, trust-on-first-use prompt, warn on change). No silent downgrade from verified to unverified.
+- **Query safety:** confirm destructive statements (DELETE/UPDATE without WHERE, DROP, TRUNCATE); per-connection read-only mode; prod color tags; edits only by primary key with a SQL preview. User SQL runs as written; we never build SQL by string-pasting values (use parameters or explicit casts).
+- **Local data:** saved connections and query history live in SQLite. Add a "don't record history" option and a retention limit; history may contain sensitive literals. Exports are written only where the user chooses.
+- **Supply chain:** CI runs `npm audit` and `cargo audit`; commit lockfiles; add dependencies only with a reason; pin the Rust toolchain.
+- **Release (Phase 5):** code signing and notarization; signed auto-updates (updater keys kept offline); publish checksums.
+- **Reporting:** add a `SECURITY.md` with a private reporting contact before inviting outside use.
+
+Known gap: query history encryption at rest is undecided (see open questions).

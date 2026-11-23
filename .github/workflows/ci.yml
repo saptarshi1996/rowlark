@@ -45,3 +45,21 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+
+  # Known-vulnerability scan of dependencies. Kept as its own job so a new
+  # advisory shows up separately from build/test failures.
+  audit:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Fails on high or critical advisories in npm dependencies.
+      - run: npm audit --audit-level=high
+      # Prebuilt cargo-audit binary (much faster than compiling it).
+      - uses: taiki-e/install-action@cargo-audit
+      # Fails on known vulnerabilities in Cargo.lock; "unmaintained" crates only warn.
+      - run: cargo audit
