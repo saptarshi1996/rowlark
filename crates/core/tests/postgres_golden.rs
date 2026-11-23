@@ -26,7 +26,7 @@ const SERVERS: [(u16, &str); 4] = [
 
 /// Every column of the golden table. `id` is first so we can order rows.
 /// `pg_temp.mood` is a throwaway enum, to check that a type we have never
-/// heard of still shows up as text instead of crashing.
+/// heard of still shows up as text, with its real name, instead of crashing.
 const CREATE_TABLE: &str = "\
     CREATE TYPE pg_temp.mood AS ENUM ('sad', 'ok', 'happy'); \
     CREATE TEMP TABLE golden ( \
@@ -36,7 +36,10 @@ const CREATE_TABLE: &str = "\
         c_json json, c_jsonb jsonb, c_date date, c_time time, c_timetz timetz, \
         c_timestamp timestamp, c_timestamptz timestamptz, c_uuid uuid, \
         c_interval interval, c_int_array int4[], c_text_array text[], \
-        c_enum pg_temp.mood, c_inet inet, c_oid oid \
+        c_enum pg_temp.mood, c_inet inet, c_oid oid, \
+        c_matrix int4[], c_numeric_array numeric[], c_enum_array pg_temp.mood[], \
+        c_money money, c_range int4range, c_bit bit(4), c_macaddr macaddr, c_point point, \
+        c_cidr cidr, c_tsrange tstzrange \
     ); \
     CREATE TEMP TABLE golden_copy (LIKE golden)";
 
@@ -47,7 +50,10 @@ const ROW_TYPICAL: &str = "\
         '2026-11-24', '13:45:10.123456', '13:45:10+05:30', \
         '2026-11-24 13:45:10.123456', '2026-11-24 13:45:10.123456+00', \
         'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '1 year 2 mons 3 days 04:05:06', \
-        '{1,2,3}', '{\"a b\",\"c,d\"}', 'ok', '192.168.0.1/24', 4294967295)";
+        '{1,2,3}', '{\"a b\",\"c,d\"}', 'ok', '192.168.0.1/24', 4294967295, \
+        '{{1,2},{3,4}}', '{0.10,12345678901234567890.123456789,NaN}', '{sad,happy}', \
+        '$1,234.56', '[1,10)', B'1010', '08:00:2b:01:02:03', '(1.5,-2)', \
+        '10.1.2.0/24', '[2026-01-01 00:00:00+00,2026-02-01 00:00:00+00)')";
 
 /// Edge values: limits, odd text, awkward spacing, a DST timestamp, infinity.
 const ROW_EDGES: &str = "\
@@ -58,7 +64,10 @@ const ROW_EDGES: &str = "\
         'infinity', '24:00:00', '23:59:59.999999-14:00', '-infinity', \
         '2026-03-29 01:30:00+00', 'ffffffff-ffff-ffff-ffff-ffffffffffff', \
         '-1 days -02:00:00', '{NULL,1}', '{NULL,\"NULL\",\"with \\\"quote\\\"\",\"\"}', \
-        'happy', '::1', 0)";
+        'happy', '::1', 0, \
+        '{{NULL,1},{2,NULL}}', '{}', '{NULL,ok}', \
+        '-$0.01', 'empty', B'0000', 'ff:ff:ff:ff:ff:ff', '(0,0)', \
+        '::1/128', 'empty')";
 
 /// More numeric edges: NaN decimal, tiny decimal, infinity, negative zero.
 const ROW_NUMBERS: &str = "\
@@ -85,6 +94,7 @@ async fn query(driver: &PostgresDriver, sql: &str) -> Table {
             match event {
                 QueryEvent::Columns(c) => columns = c,
                 QueryEvent::Rows(mut r) => rows.append(&mut r),
+                QueryEvent::Notice(_) => {}
             }
         }
         (columns, rows)
@@ -100,25 +110,50 @@ fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "''"))
 }
 
+/// The text form of a single (non-NULL, non-array) value, as Postgres reads it.
+fn text_of(value: &Value) -> String {
+    match value {
+        Value::Bool(b) => (if *b { "t" } else { "f" }).to_string(),
+        Value::Int(i) => i.to_string(),
+        Value::UInt(u) => u.to_string(),
+        // Rust prints NaN as "NaN" and infinity as "inf"; Postgres reads both.
+        Value::Float(f) => f.to_string(),
+        Value::Decimal(s) | Value::Text(s) | Value::Json(s) => s.clone(),
+        Value::Date(s) | Value::Time(s) | Value::Uuid(s) => s.clone(),
+        Value::Bytes(bytes) => {
+            let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            format!("\\x{hex}")
+        }
+        Value::Timestamp { iso, .. } => iso.clone(),
+        Value::Unknown { text, .. } => text.clone(),
+        Value::Null | Value::Array(_) => panic!("not a single value: {value:?}"),
+    }
+}
+
+/// An array as Postgres array text: `{"a","b",NULL,{...}}`. Every element is
+/// quoted (with `\` and `"` escaped) so no value can be misread.
+fn array_literal(items: &[Value]) -> String {
+    let parts: Vec<String> = items
+        .iter()
+        .map(|item| match item {
+            Value::Null => "NULL".to_string(),
+            Value::Array(inner) => array_literal(inner),
+            other => format!(
+                "\"{}\"",
+                text_of(other).replace('\\', "\\\\").replace('"', "\\\"")
+            ),
+        })
+        .collect();
+    format!("{{{}}}", parts.join(","))
+}
+
 /// Turn a `Value` back into SQL. Everything becomes a quoted text literal and
 /// the server converts it to the column's type. This is how edits will work.
 fn to_sql(value: &Value) -> String {
     match value {
         Value::Null => "NULL".to_string(),
-        Value::Bool(b) => quote(if *b { "t" } else { "f" }),
-        Value::Int(i) => quote(&i.to_string()),
-        Value::UInt(u) => quote(&u.to_string()),
-        // Rust prints NaN as "NaN" and infinity as "inf"; Postgres reads both.
-        Value::Float(f) => quote(&f.to_string()),
-        Value::Decimal(s) | Value::Text(s) | Value::Json(s) => quote(s),
-        Value::Date(s) | Value::Time(s) | Value::Uuid(s) => quote(s),
-        Value::Bytes(bytes) => {
-            let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-            quote(&format!("\\x{hex}"))
-        }
-        Value::Timestamp { iso, .. } => quote(iso),
-        Value::Unknown { text, .. } => quote(text),
-        Value::Array(_) => panic!("arrays are not produced yet"),
+        Value::Array(items) => quote(&array_literal(items)),
+        other => quote(&text_of(other)),
     }
 }
 
@@ -133,12 +168,7 @@ fn cell<'a>(table: &'a Table, row: usize, column: &str) -> &'a Value {
 }
 
 async fn golden_round_trip(port: u16, label: &str) {
-    let config = ConnectionConfig {
-        host: "127.0.0.1".into(),
-        port,
-        user: "rowlark".into(),
-        database: "rowlark_test".into(),
-    };
+    let config = ConnectionConfig::new("127.0.0.1", port, "rowlark", "rowlark_test");
     let driver = PostgresDriver::connect(&config, "rowlark")
         .await
         .unwrap_or_else(|e| panic!("{label}: is docker compose up? {e}"));
@@ -233,13 +263,79 @@ async fn golden_round_trip(port: u16, label: &str) {
     );
     assert!(matches!(cell(&first, edges, "c_float8"), Value::Float(f) if f.is_nan()));
 
-    // Types we do not map yet still come through with the server's own text.
-    // (The enum's real name is not known on this protocol, so it is labelled
-    // by its type number, "oid:12345".)
-    assert!(matches!(
-        cell(&first, edges, "c_enum"),
-        Value::Unknown { type_name, text } if type_name.starts_with("oid:") && text == "happy"
-    ));
+    // Types we do not map yet still come through with the server's own text,
+    // and their real name, looked up on the introspection connection.
+    let mood = |text: &str| Value::Unknown {
+        type_name: "mood".into(),
+        text: text.into(),
+    };
+    assert_eq!(cell(&first, edges, "c_enum"), &mood("happy"));
+    let type_of = |name: &str| {
+        first
+            .columns
+            .iter()
+            .find(|c| c.name == name)
+            .map(|c| c.type_name.as_str())
+    };
+    assert_eq!(type_of("c_enum"), Some("mood"));
+    assert_eq!(type_of("c_enum_array"), Some("mood[]"));
+    assert_eq!(type_of("c_int_array"), Some("INT4[]"));
+    assert_eq!(
+        cell(&first, edges, "c_enum_array"),
+        &Value::Array(vec![Value::Null, mood("ok")])
+    );
+    assert_eq!(
+        cell(&first, typical, "c_enum_array"),
+        &Value::Array(vec![mood("sad"), mood("happy")])
+    );
+
+    // Arrays: parsed into lists, NULL elements kept, quoting undone, nesting kept.
+    let ints = |items: &[Option<i64>]| {
+        Value::Array(
+            items
+                .iter()
+                .map(|i| i.map_or(Value::Null, Value::Int))
+                .collect(),
+        )
+    };
+    assert_eq!(
+        cell(&first, typical, "c_int_array"),
+        &ints(&[Some(1), Some(2), Some(3)])
+    );
+    assert_eq!(cell(&first, edges, "c_int_array"), &ints(&[None, Some(1)]));
+    assert_eq!(
+        cell(&first, typical, "c_text_array"),
+        &Value::Array(vec![Value::Text("a b".into()), Value::Text("c,d".into())])
+    );
+    assert_eq!(
+        cell(&first, edges, "c_text_array"),
+        &Value::Array(vec![
+            Value::Null,
+            Value::Text("NULL".into()),
+            Value::Text("with \"quote\"".into()),
+            Value::Text("".into()),
+        ])
+    );
+    assert_eq!(
+        cell(&first, typical, "c_matrix"),
+        &Value::Array(vec![ints(&[Some(1), Some(2)]), ints(&[Some(3), Some(4)])])
+    );
+    assert_eq!(
+        cell(&first, edges, "c_matrix"),
+        &Value::Array(vec![ints(&[None, Some(1)]), ints(&[Some(2), None])])
+    );
+    assert_eq!(
+        cell(&first, typical, "c_numeric_array"),
+        &Value::Array(vec![
+            Value::Decimal("0.10".into()),
+            Value::Decimal("12345678901234567890.123456789".into()),
+            Value::Decimal("NaN".into()),
+        ])
+    );
+    assert_eq!(
+        cell(&first, edges, "c_numeric_array"),
+        &Value::Array(vec![])
+    );
 
     let numbers = 2;
     assert_eq!(

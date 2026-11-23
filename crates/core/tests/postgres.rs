@@ -17,12 +17,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 fn config(port: u16) -> ConnectionConfig {
-    ConnectionConfig {
-        host: "127.0.0.1".into(),
-        port,
-        user: "rowlark".into(),
-        database: "rowlark_test".into(),
-    }
+    ConnectionConfig::new("127.0.0.1", port, "rowlark", "rowlark_test")
 }
 
 /// Connect to the Postgres 16 test server.

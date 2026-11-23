@@ -28,12 +28,14 @@ Strong in JavaScript/TypeScript, learning Rust as the project goes. So:
 - **Theme:** dark mode only, permanently. All colors come from one theme module in the UI crate; no light theme or toggle.
 - **License:** intentionally none for now (public, view-only). Don't add a LICENSE file or `license` fields until the owner decides.
 - Order of work: `Value` + `Driver` + Docker tests first, UI after. New drivers or types need golden tests.
+- **Tests:** every feature and every bug fix ships with tests that run in CI (database tests included). CI measures coverage and fails below 95% of lines, so untested code turns it red. Fix a bug test-first: write the test, watch it fail, then fix.
 
 ## Commands
 
 - Rust tests: `cargo test --workspace` (unit tests only; this is what CI runs)
-- DB tests: `docker compose up -d`, then `cargo test --workspace -- --include-ignored`. Tests that need the Docker servers are marked `#[ignore]` so CI (no Docker) skips them.
-- Test DBs: `docker compose up -d` (needs Docker or Colima running; with Colima the compose plugin may need registering)
+- All tests (what CI runs on Linux): `scripts/gen-test-certs.sh && docker compose up -d --wait postgres14 postgres15 postgres16 postgres17 postgres16tls`, then `cargo test --workspace -- --include-ignored`. Tests that need the Docker servers are marked `#[ignore]`, so plain `cargo test` (the macOS CI job) skips them.
+- Test DBs: `docker compose up -d` (needs Docker or Colima running; with Colima the compose plugin may need registering, or use `docker-compose`). The TLS test server needs `scripts/gen-test-certs.sh` first.
+- Coverage (same as CI): `cargo llvm-cov --workspace --ignore-filename-regex '/tests/' --fail-under-lines 95 -- --include-ignored` (needs `cargo install cargo-llvm-cov` and `rustup component add llvm-tools-preview`)
 - Rust format/lint: `cargo fmt --all` / `cargo clippy --workspace --all-targets -- -D warnings`
 - Rust is pinned in `rust-toolchain.toml` (rustup installs it automatically)
 - Run the app: `cargo run -p <ui-crate>` (crate does not exist yet)

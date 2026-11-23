@@ -146,9 +146,32 @@ Code signing/notarization (macOS), then Windows and Linux packages, auto-update,
 - [x] Phase 0 scaffold (Tauri + React, since removed)
 - [x] Decision: fully native Rust UI (2026-11-24); web UI and Tauri shell removed
 - [x] Phase 1a: `Driver` trait, `PostgresDriver` (connect, ping, streamed `run_query`, `cancel`), golden type round-trip on Postgres 14–17
-- [ ] Phase 1b-prep: Postgres introspection and arrays, then the MySQL/MariaDB driver with the same tests
+- [x] Postgres introspection: `list_databases`, `list_schemas`, `list_tables`, `describe_table` (columns, primary key, indexes, foreign keys) on its own connection, tested on Postgres 14–17
+- [x] Postgres arrays (`Value::Array`, nested, NULLs, quoting) and real names for custom types (enums etc.), tested on Postgres 14–17
+- [x] Finish Postgres completely (owner's call, 2026-11-24) before touching MySQL/MariaDB: see "Postgres: done" below
+- [ ] Then the MySQL/MariaDB driver with the same tests (re-check the introspection names and shapes against MySQL: "schema" vs "database")
 - [ ] Remaining Phase 1: connection model + keychain (UI after)
 - [ ] Phase 0b UI spike
+
+### Postgres: done (2026-11-24)
+
+All of the following are built and tested against Postgres 14–17 (and a TLS server):
+
+- [x] Column headers for results with zero rows: the statement is described on the separate introspection connection, never the user's own (a failed describe would abort the user's open transaction; a test proves it does not). Known limits: several statements in one run, and tables only the main session can see (temp tables, tables created in the still-open transaction), get no headers.
+- [x] TLS: disable / prefer / require / verify-ca / verify-full, custom CA, client certificates. Uses rustls and the operating system's trusted authorities. Known limitation: with sqlx 0.8.6, `verify-ca` still rejects a wrong host name (stricter than intended, never weaker), so use `verify-full` for remote servers.
+- [x] `postgres://` URL parsing (`ConnectionConfig::from_postgres_url`); unknown options are errors, so a typo like `sslmod=require` cannot silently weaken security.
+- [x] Connect timeout, `application_name = Rowlark` (visible in `pg_stat_activity`), and TCP keepalive requested from the server (best effort: `set_config`, so it is skipped quietly where a proxy refuses it).
+- [x] Where each result column came from (`Column::origin`: schema, table, real column name), for editing query results by primary key. Expressions have no origin.
+- [x] Server notices (`RAISE NOTICE`, "table does not exist, skipping") arrive as `QueryEvent::Notice`, in order with the rows; and `transaction_state()` (Idle / Open / Aborted / Busy) so the UI can show an open transaction.
+- [x] More types: money, ranges, bit strings, MAC and CIDR addresses, points, intervals and inet stay as `Unknown` with their exact text and real type name. Dedicated `Value` variants would add nothing (same text) and would bloat the `Value` the MySQL driver shares, so this is a decision, not a gap.
+
+Hardening found by testing (all fixed, each with a test): rows already read were dropped when a statement failed partway (up to 999 of them); the introspection connection stayed dead forever once it died (it now reconnects); invalid UTF-8 text from SQL_ASCII databases is passed on as exact bytes, never as replacement characters (the server also refuses to send it unless the session asks for `client_encoding = 'SQL_ASCII'`).
+
+Measured: 1,000,000 rows stream in about 1.9 s (about 535,000 rows/s) on an Apple Silicon laptop against a local Docker Postgres, never more than 1,000 rows held at a time; a slow reader makes the driver wait instead of buffering. `COPY ... TO STDOUT` is not supported (a different wire protocol) but does not hang or break the connection.
+
+Test status: 107 tests, about 97% line coverage. What is left uncovered is defensive code that cannot be triggered (impossible index checks, binary-format guard, tracing boilerplate). CI fails below 95%.
+
+Still not done for Postgres (deliberately): Unix-socket connections, automatic reconnect, SSH tunnels (Phase 1b, shared with MySQL), and `LISTEN/NOTIFY`.
 
 ## 11. Open questions
 
@@ -157,7 +180,7 @@ Code signing/notarization (macOS), then Windows and Linux packages, auto-update,
 - SQL editor: build on a GPUI component editor vs. something custom; syntax highlighting via tree-sitter.
 - Keep `serde`/JSON on `Value` or drop it (see §4)?
 - License: none for now (view-only). Pick one before inviting use or contributions. Note GPUI components are Apache-2.0; check compatibility when choosing.
-- CI for the DB tests: deferred. macOS only, no Linux or Windows jobs, so the Docker-based DB suite runs locally only. Revisit when Linux comes back.
+- CI runs every test: the macOS job does fmt, clippy and the unit tests; a Linux job starts the Docker databases (Postgres 14–17 and the TLS server) and runs `cargo test -- --include-ignored`. The UI crate will need its own macOS job later (GPUI needs Xcode's Metal tools).
 - Verify the name "Rowlark" on GitHub/web/app stores before going public.
 - Encrypt query history and saved connection metadata at rest, or rely on OS disk encryption (FileVault)?
 

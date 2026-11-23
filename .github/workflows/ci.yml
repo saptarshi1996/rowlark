@@ -6,6 +6,9 @@ on:
   pull_request:
 
 jobs:
+  # Format, lint and the tests that need no database. Runs on macOS, the
+  # platform we ship for first. (macOS runners have no Docker, so the database
+  # tests run in the next job.)
   check:
     strategy:
       fail-fast: false
@@ -29,6 +32,66 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+
+  # Every test, including the ones that talk to real databases. They start the
+  # same Docker servers we use locally (Postgres 14-17 and a TLS one), then run
+  # `cargo test -- --include-ignored`, which also runs the tests marked
+  # #[ignore] (those are the ones that need the servers).
+  #
+  # The run is measured for coverage (how much of our code the tests execute).
+  # It fails if line coverage drops below 95%, so new code without tests turns
+  # CI red. What is left uncovered is mostly defensive code that cannot be
+  # triggered, such as "impossible" index checks and tracing boilerplate.
+  database-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.100.0
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      # Throwaway certificates for the TLS test server.
+      - run: scripts/gen-test-certs.sh
+
+      # `--wait` returns once every service reports healthy.
+      - name: Start the test databases
+        run: >
+          docker compose up -d --wait
+          postgres14 postgres15 postgres16 postgres17 postgres16tls
+
+      - name: Run all tests, including the database tests, with coverage
+        run: >
+          cargo llvm-cov --workspace --ignore-filename-regex '/tests/'
+          --fail-under-lines 95 --lcov --output-path lcov.info
+          -- --include-ignored
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          {
+            echo '### Test coverage'
+            echo '```'
+            cargo llvm-cov report --ignore-filename-regex '/tests/' --summary-only
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-lcov
+          path: lcov.info
+
+      # If something failed, the server logs usually explain why.
+      - name: Show database logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=100
 
   # Known-vulnerability scan of dependencies. Kept as its own job so a new
   # advisory shows up separately from build/test failures.

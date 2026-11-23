@@ -41,14 +41,19 @@ cargo test --workspace                            # Rust tests
 
 ### Test databases
 
-`docker-compose.yml` starts PostgreSQL 14–17, MySQL 8/9 and MariaDB 11 for driver tests. Each server has its own host port. Credentials are dev-only: user, password and database are `rowlark` / `rowlark` / `rowlark_test`.
+`docker-compose.yml` starts PostgreSQL 14–17 (plus a Postgres 16 with TLS), MySQL 8/9 and MariaDB 11 for driver tests. Each server has its own host port. Credentials are dev-only: user, password and database are `rowlark` / `rowlark` / `rowlark_test`.
 
 ```sh
+scripts/gen-test-certs.sh         # throwaway TLS certificates, needed once for the TLS server
 docker compose up -d              # all servers (Colima users: if `docker compose` is not found,
                                   # link the compose plugin into ~/.docker/cli-plugins or use `docker-compose`)
 docker compose up -d postgres16   # just one
 docker compose down
+
+cargo test --workspace -- --include-ignored    # every test, including the ones that need the servers
 ```
+
+Plain `cargo test --workspace` skips the tests that need the servers. CI runs all of them on every push.
 
 MySQL 5.7 is not included for now: it has no native arm64 image.
 

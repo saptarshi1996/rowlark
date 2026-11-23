@@ -1,6 +1,9 @@
 # Build output
 target/
 
+# Throwaway TLS certificates for tests (made by scripts/gen-test-certs.sh)
+.test-certs/
+
 # Environment and secrets (never commit these)
 .env
 .env.*

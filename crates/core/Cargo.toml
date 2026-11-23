@@ -11,10 +11,19 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 # Database access. default-features = false drops the compile-time query macros
 # (we run arbitrary user SQL, so we cannot use them) and every database we do
-# not support yet. TLS is added in Phase 1b.
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres"] }
-# Async runtime pieces used directly: channels (`mpsc`) and an async `Mutex`.
-tokio = { version = "1", features = ["sync"] }
+# not support yet. `tls-rustls-ring-native-roots` adds TLS (rustls) and makes it
+# trust the operating system's certificate authorities, so verified TLS works
+# against public cloud databases without extra files.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "tls-rustls-ring-native-roots"] }
+# Async runtime pieces used directly: channels (`mpsc`), an async `Mutex`, and
+# `timeout` for connecting.
+tokio = { version = "1", features = ["sync", "time"] }
+# Reading `postgres://` URLs (both already come with sqlx, so no extra build cost).
+url = "2"
+percent-encoding = "2"
+# Catching the server's notices. sqlx reports them only as `tracing` events, so
+# we listen for those (tracing is already in the build through sqlx).
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 # `StreamExt::next()` for reading rows one by one from sqlx.
 futures-util = { version = "0.3", default-features = false }
 

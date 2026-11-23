@@ -4,17 +4,24 @@
 //! (and so the UI can be swapped without touching the drivers).
 //!
 //! - `value`: the `Value` enum, one cell of data.
+//! - `connection`: how to reach a database (host, TLS, URLs).
 //! - `driver`: the `Driver` trait and the types it uses.
+//! - `schema`: the normalized model of a database's structure (tables, columns...).
 //! - `postgres`: the PostgreSQL driver.
 
+pub mod connection;
 pub mod driver;
 pub mod postgres;
+pub mod schema;
 pub mod value;
 
+pub use connection::{ConnectionConfig, TlsConfig, TlsMode};
 pub use driver::{
-    Column, ConnectionConfig, Driver, DriverError, Flavor, QueryEvent, QuerySummary, ServerInfo,
+    Column, ColumnOrigin, Driver, DriverError, Flavor, Notice, NoticeSeverity, QueryEvent,
+    QuerySummary, ServerInfo, TransactionState,
 };
 pub use postgres::PostgresDriver;
+pub use schema::{ColumnInfo, ForeignKeyInfo, IndexInfo, TableDetails, TableInfo, TableKind};
 pub use value::Value;
 
 /// Returns the version of the core crate, taken from Cargo.toml at compile time.

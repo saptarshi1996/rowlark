@@ -1,7 +1,8 @@
 # Test databases for Rowlark's driver and golden tests. Dev-only credentials.
 # Start: `docker compose up -d`   Stop: `docker compose down`
 # Each server gets its own host port so they can all run at once.
-#   Postgres 14-17 -> 54314..54317    MySQL 8/9 -> 33080/33090    MariaDB -> 33106
+#   Postgres 14-17 -> 54314..54317    Postgres 16 with TLS -> 54326
+#   MySQL 8/9 -> 33080/33090    MariaDB -> 33106
 # User: rowlark / Password: rowlark / Database: rowlark_test
 
 x-postgres: &postgres
@@ -44,6 +45,37 @@ services:
     <<: *postgres
     image: postgres:17
     ports: ["54317:5432"]
+
+  # Postgres with TLS switched on, for the TLS tests. Needs test certificates
+  # first: run scripts/gen-test-certs.sh before `docker compose up`.
+  # Users: "rowlark" (password, TLS optional) and "rowlark_cert" (client
+  # certificate only). The server certificate is for the name "localhost".
+  # The wrapper copies the certificates somewhere owned by the postgres user,
+  # because Postgres refuses a private key with the wrong owner or permissions.
+  postgres16tls:
+    <<: *postgres
+    image: postgres:16
+    ports: ["54326:5432"]
+    volumes:
+      - ./.test-certs:/certs:ro
+      - ./docker/tls:/tlsconf:ro
+      - ./docker/tls/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        mkdir -p /var/lib/postgresql/tls
+        cp /certs/server.crt /certs/server.key /certs/ca.crt /var/lib/postgresql/tls/
+        cp /tlsconf/pg_hba.conf /var/lib/postgresql/tls/
+        chown -R postgres:postgres /var/lib/postgresql/tls
+        chmod 600 /var/lib/postgresql/tls/server.key
+        exec docker-entrypoint.sh postgres \
+          -c ssl=on \
+          -c ssl_cert_file=/var/lib/postgresql/tls/server.crt \
+          -c ssl_key_file=/var/lib/postgresql/tls/server.key \
+          -c ssl_ca_file=/var/lib/postgresql/tls/ca.crt \
+          -c hba_file=/var/lib/postgresql/tls/pg_hba.conf
 
   mysql8:
     <<: *mysql

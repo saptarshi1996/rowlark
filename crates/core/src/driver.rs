@@ -12,6 +12,7 @@ use std::future::Future;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
+use crate::schema::{TableDetails, TableInfo};
 use crate::value::Value;
 
 /// Which database family we are talking to. Detected on connect from the
@@ -23,19 +24,6 @@ pub enum Flavor {
     MariaDb,
 }
 
-/// Where and how to connect.
-///
-/// The password is deliberately NOT a field here. It lives in the OS keychain
-/// and is passed to `connect` separately, so it cannot end up in a log line
-/// through `{:?}` printing or in a saved config file by accident.
-#[derive(Debug, Clone)]
-pub struct ConnectionConfig {
-    pub host: String,
-    pub port: u16,
-    pub user: String,
-    pub database: String,
-}
-
 /// What `ping` learns about the server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerInfo {
@@ -44,11 +32,63 @@ pub struct ServerInfo {
     pub version: String,
 }
 
+/// Where a result column comes from, when it is a plain column of a table.
+///
+/// Editing a query result needs this: to change a cell, we have to know which
+/// table and column it belongs to, so we can find the row by its primary key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnOrigin {
+    pub schema: String,
+    pub table: String,
+    /// The column's real name in the table (the result may call it something
+    /// else, e.g. `SELECT email AS contact`).
+    pub column: String,
+}
+
 /// One result column: its name and the server's name for its type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Column {
     pub name: String,
     pub type_name: String,
+    /// `None` for anything that is not a plain table column: expressions like
+    /// `count(*)` or `a + 1`, and values from views or subqueries that the
+    /// server cannot trace back to one table.
+    pub origin: Option<ColumnOrigin>,
+}
+
+/// How serious a server message is, from most to least.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeSeverity {
+    Error,
+    Warning,
+    /// Ordinary notices, such as `RAISE NOTICE` or "table does not exist, skipping".
+    Notice,
+    /// Informational messages (`RAISE INFO`, log lines).
+    Info,
+    Debug,
+}
+
+/// A message the server sent alongside a query's results, such as the text of
+/// `RAISE NOTICE 'hello'` from a function, or "relation already exists, skipping".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notice {
+    pub severity: NoticeSeverity,
+    pub message: String,
+}
+
+/// Where the connection stands with respect to transactions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransactionState {
+    /// No transaction is open; each statement commits by itself.
+    Idle,
+    /// A transaction is open (the user ran `BEGIN`). Locks may be held until
+    /// they `COMMIT` or `ROLLBACK`, so the UI should make this visible.
+    Open,
+    /// A statement failed inside a transaction. Everything fails with
+    /// "current transaction is aborted" until the user runs `ROLLBACK`.
+    Aborted,
+    /// A query is running right now, so the state cannot be checked.
+    Busy,
 }
 
 /// What a running query sends to the caller through a channel.
@@ -61,6 +101,9 @@ pub enum QueryEvent {
     Columns(Vec<Column>),
     /// A batch of rows (about 1,000 at a time). Each row has one `Value` per column.
     Rows(Vec<Vec<Value>>),
+    /// A message from the server. Arrives in between the other events, in the
+    /// order the server sent it.
+    Notice(Notice),
 }
 
 /// What the driver reports once the query has finished.
@@ -90,6 +133,9 @@ pub enum DriverError {
     /// This is not a failure, so the UI can show it differently from `Server`.
     #[error("query cancelled")]
     Cancelled,
+    /// The connection settings are wrong (a bad URL, a missing file, ...).
+    #[error("invalid connection settings: {0}")]
+    InvalidConfig(String),
     /// The UI stopped listening (closed the tab), so the query was abandoned.
     #[error("the result receiver was closed")]
     ReceiverClosed,
@@ -126,4 +172,44 @@ pub trait Driver: Send + Sync {
     /// The stopped `run_query` returns `Err(DriverError::Cancelled)`.
     /// If nothing is running, this does nothing and returns `Ok`.
     fn cancel(&self) -> impl Future<Output = Result<(), DriverError>> + Send;
+
+    /// Whether a transaction is open on this connection.
+    ///
+    /// Asks the server, so it also notices a `BEGIN` the user typed. Returns
+    /// `Busy` straight away while a query is running.
+    fn transaction_state(
+        &self,
+    ) -> impl Future<Output = Result<TransactionState, DriverError>> + Send;
+
+    // ---- Introspection: asking the database to describe itself. ----
+    //
+    // These use their own connection, so the sidebar keeps working while a
+    // long query runs on the main one. They are loaded one level at a time
+    // (databases, schemas, tables, then one table's details) so a huge
+    // database does not slow the UI down.
+    //
+    // Note: "schema" is Postgres's word. When the MySQL driver arrives we will
+    // check these names and shapes still fit both, and adjust while the trait
+    // is small.
+
+    /// The databases on this server that you can connect to.
+    fn list_databases(&self) -> impl Future<Output = Result<Vec<String>, DriverError>> + Send;
+
+    /// The schemas inside the database this connection is using
+    /// (system schemas like `pg_catalog` are left out).
+    fn list_schemas(&self) -> impl Future<Output = Result<Vec<String>, DriverError>> + Send;
+
+    /// The tables and views in one schema.
+    fn list_tables(
+        &self,
+        schema: &str,
+    ) -> impl Future<Output = Result<Vec<TableInfo>, DriverError>> + Send;
+
+    /// Columns, primary key, indexes and foreign keys of one table or view.
+    /// An unknown table gives the server's own "does not exist" error.
+    fn describe_table(
+        &self,
+        schema: &str,
+        table: &str,
+    ) -> impl Future<Output = Result<TableDetails, DriverError>> + Send;
 }
