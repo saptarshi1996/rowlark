@@ -6,18 +6,13 @@ on:
   pull_request:
 
 jobs:
-  # Format, lint and the tests that need no database. Runs on macOS, the
-  # platform we ship for first. (macOS runners have no Docker, so the database
-  # tests run in the next job.)
-  check:
-    strategy:
-      fail-fast: false
-      matrix:
-        # macOS only for now. Re-add windows-latest and ubuntu-22.04 when we
-        # start on those platforms (the native UI will need extra system
-        # libraries on Linux; add that step then).
-        os: [macos-latest]
-    runs-on: ${{ matrix.os }}
+  # Formatting and lint warnings. Quick, so it runs on Linux and gives an answer
+  # in about a minute. (Rowlark ships on macOS first, but `crates/core` has no
+  # macOS-specific code and is also tested on the developer's Mac. A macOS job
+  # comes back together with the native UI crate, which genuinely needs macOS:
+  # GPUI builds with Apple's Metal tools.)
+  lint:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -31,7 +26,6 @@ jobs:
 
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
 
   # Every test, including the ones that talk to real databases. They start the
   # same Docker servers we use locally (Postgres 14-17 and a TLS one), then run
@@ -96,7 +90,7 @@ jobs:
   # Known-vulnerability scan of dependencies. Kept as its own job so a new
   # advisory shows up separately from build/test failures.
   audit:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       # Prebuilt cargo-audit binary (much faster than compiling it).

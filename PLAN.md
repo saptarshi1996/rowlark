@@ -100,7 +100,7 @@ Rules:
 
 - On connect, run `SELECT VERSION()` and store `Flavor::{Postgres, MySql, MariaDb}` plus version. Keep quirks (information_schema differences, JSON-as-LONGTEXT in MariaDB, etc.) inside the driver.
 - `docker-compose.yml`: Postgres 14–17, MySQL 8/9, MariaDB 11, each on its own port. MySQL 5.7 is dropped for now (no arm64 image, slow under emulation on Apple Silicon); add MariaDB 10 or MySQL 5.7 later if needed.
-- The same integration suite runs against every service. Locally it uses Docker (Colima works). CI is macOS-only for now (macOS runners have no Docker), so the DB suite runs locally only until Linux returns (see open questions).
+- The same integration suite runs against every service. Locally it uses Docker (Colima works). CI runs the whole suite, DB tests included, on a Linux runner (Docker is available there; macOS runners have none).
 
 ## 8. Cross-platform notes
 
@@ -180,7 +180,7 @@ Still not done for Postgres (deliberately): Unix-socket connections, automatic r
 - SQL editor: build on a GPUI component editor vs. something custom; syntax highlighting via tree-sitter.
 - Keep `serde`/JSON on `Value` or drop it (see §4)?
 - License: none for now (view-only). Pick one before inviting use or contributions. Note GPUI components are Apache-2.0; check compatibility when choosing.
-- CI runs every test: the macOS job does fmt, clippy and the unit tests; a Linux job starts the Docker databases (Postgres 14–17 and the TLS server) and runs `cargo test -- --include-ignored`. The UI crate will need its own macOS job later (GPUI needs Xcode's Metal tools).
+- CI runs on Linux only for now: a `lint` job (fmt, clippy), a `database-tests` job (starts the Docker databases, runs every test under coverage, fails below 95% of lines) and an `audit` job. The macOS job was dropped on 2026-11-24: it could only run the non-database tests, and macOS runners queued for 10+ minutes. Add a macOS job back together with the UI crate (GPUI needs Xcode's Metal tools); until then macOS is covered by running the suite locally.
 - Verify the name "Rowlark" on GitHub/web/app stores before going public.
 - Encrypt query history and saved connection metadata at rest, or rely on OS disk encryption (FileVault)?
 

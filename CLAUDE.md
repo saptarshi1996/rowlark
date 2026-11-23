@@ -33,7 +33,7 @@ Strong in JavaScript/TypeScript, learning Rust as the project goes. So:
 ## Commands
 
 - Rust tests: `cargo test --workspace` (unit tests only; this is what CI runs)
-- All tests (what CI runs on Linux): `scripts/gen-test-certs.sh && docker compose up -d --wait postgres14 postgres15 postgres16 postgres17 postgres16tls`, then `cargo test --workspace -- --include-ignored`. Tests that need the Docker servers are marked `#[ignore]`, so plain `cargo test` (the macOS CI job) skips them.
+- All tests (what CI runs on Linux): `scripts/gen-test-certs.sh && docker compose up -d --wait postgres14 postgres15 postgres16 postgres17 postgres16tls`, then `cargo test --workspace -- --include-ignored`. Tests that need the Docker servers are marked `#[ignore]`, so plain `cargo test` skips them (CI's `database-tests` job runs everything).
 - Test DBs: `docker compose up -d` (needs Docker or Colima running; with Colima the compose plugin may need registering, or use `docker-compose`). The TLS test server needs `scripts/gen-test-certs.sh` first.
 - Coverage (same as CI): `cargo llvm-cov --workspace --ignore-filename-regex '/tests/' --fail-under-lines 95 -- --include-ignored` (needs `cargo install cargo-llvm-cov` and `rustup component add llvm-tools-preview`)
 - Rust format/lint: `cargo fmt --all` / `cargo clippy --workspace --all-targets -- -D warnings`
