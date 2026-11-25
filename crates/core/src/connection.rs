@@ -123,6 +123,17 @@ impl ConnectionConfig {
             .map(|h| h.trim_start_matches('[').trim_end_matches(']'))
             .filter(|h| !h.is_empty())
             .ok_or_else(|| bad("the URL has no host (Unix sockets are not supported yet)"))?;
+        // libpq writes a socket directory as a percent-encoded host
+        // (`postgres://u@%2Fvar%2Frun%2Fpostgresql/db`). Without this check it
+        // would be tried as a host name and fail later with a confusing DNS error.
+        if percent_decode_str(host)
+            .decode_utf8_lossy()
+            .starts_with('/')
+        {
+            return Err(bad(
+                "Unix sockets are not supported yet; use a host name or IP address",
+            ));
+        }
         let decode = |text: &str| -> Result<String, DriverError> {
             percent_decode_str(text)
                 .decode_utf8()
@@ -143,7 +154,17 @@ impl ConnectionConfig {
 
         let mut config = Self::new(host, parsed.port().unwrap_or(5432), user, database);
         config.tls = TlsConfig::new(TlsMode::Prefer);
+        // Each option may appear once. If one is repeated, one of the copies
+        // is not what the user meant, and quietly keeping the last could drop
+        // `sslmode=require`, so it is an error (the same idea as unknown options).
+        let mut seen: Vec<String> = Vec::new();
         for (key, value) in parsed.query_pairs() {
+            if seen.iter().any(|earlier| earlier == key.as_ref()) {
+                return Err(DriverError::InvalidConfig(format!(
+                    "the URL option \"{key}\" is given twice"
+                )));
+            }
+            seen.push(key.to_string());
             match key.as_ref() {
                 "sslmode" => {
                     config.tls.mode = match value.as_ref() {
@@ -168,6 +189,12 @@ impl ConnectionConfig {
                     let seconds: u64 = value
                         .parse()
                         .map_err(|_| bad("connect_timeout must be a whole number of seconds"))?;
+                    // Zero would mean "give up immediately", so every connection
+                    // would fail. (libpq reads 0 as "wait forever"; we have no
+                    // such mode, so it is better to say so than to guess.)
+                    if seconds == 0 {
+                        return Err(bad("connect_timeout must be at least 1 second"));
+                    }
                     config.connect_timeout = Duration::from_secs(seconds);
                 }
                 other => {
@@ -288,5 +315,108 @@ mod tests {
         assert!(parse_error("postgres://u@h/d?sslmod=require").contains("sslmod"));
         assert!(parse_error("postgres://u@h/d?connect_timeout=soon").contains("seconds"));
         assert!(!parse_error("not a url at all").is_empty());
+    }
+
+    #[test]
+    fn an_empty_password_counts_as_no_password() {
+        // `user:@host` and `user@host` both come back as "no password in the
+        // URL", so the caller falls back to the keychain (or an empty login).
+        assert_eq!(parse("postgres://u:@h/d").1, None);
+        assert_eq!(parse("postgres://u@h/d").1, None);
+    }
+
+    #[test]
+    fn a_missing_database_means_the_user_name_even_with_a_trailing_slash() {
+        assert_eq!(parse("postgres://bob@h/").0.database, "bob");
+        assert_eq!(parse("postgres://bob@h").0.database, "bob");
+        // A trailing question mark with no options is harmless.
+        assert_eq!(parse("postgres://bob@h/shop?").0.database, "shop");
+    }
+
+    #[test]
+    fn plus_signs_are_literal_in_passwords_but_spaces_in_options() {
+        // In the user-info part `+` is just a plus; only `%2B` is spelled out.
+        assert_eq!(parse("postgres://u:p+w@h/d").1.as_deref(), Some("p+w"));
+        assert_eq!(parse("postgres://u:p%2Bw@h/d").1.as_deref(), Some("p+w"));
+        // In the query part, `+` means a space (the usual form encoding).
+        let (config, _) = parse("postgres://u@h/d?application_name=My+Report");
+        assert_eq!(config.application_name, "My Report");
+    }
+
+    #[test]
+    fn an_unencoded_at_sign_in_the_password_still_splits_at_the_last_one() {
+        let (config, password) = parse("postgres://u:p@ss@h/d");
+        assert_eq!(config.user, "u");
+        assert_eq!(password.as_deref(), Some("p@ss"));
+        assert_eq!(config.host, "h");
+    }
+
+    #[test]
+    fn ipv6_hosts_work_without_a_port_and_the_scheme_is_case_blind() {
+        let (config, _) = parse("POSTGRESQL://u@[2001:db8::1]/d");
+        assert_eq!(config.host, "2001:db8::1");
+        assert_eq!(config.port, 5432);
+    }
+
+    #[test]
+    fn whitespace_from_copy_and_paste_is_ignored() {
+        let (config, _) = parse("  postgres://u@h/d\n");
+        assert_eq!((config.host.as_str(), config.database.as_str()), ("h", "d"));
+    }
+
+    #[test]
+    fn bad_ports_are_errors() {
+        assert!(!parse_error("postgres://u@h:99999/d").is_empty());
+        assert!(!parse_error("postgres://u@h:abc/d").is_empty());
+    }
+
+    #[test]
+    fn an_option_given_twice_is_an_error_not_a_silent_winner() {
+        // If the same setting appears twice, one of them is not what the user
+        // meant. Picking one quietly could drop `sslmode=require`.
+        assert!(parse_error("postgres://u@h/d?sslmode=require&sslmode=disable").contains("twice"));
+        assert!(
+            parse_error("postgres://u@h/d?application_name=a&application_name=b").contains("twice")
+        );
+    }
+
+    #[test]
+    fn connect_timeout_must_be_a_positive_whole_number_of_seconds() {
+        // 0 would make every connection fail at once ("wait zero seconds").
+        assert!(parse_error("postgres://u@h/d?connect_timeout=0").contains("at least 1"));
+        assert!(parse_error("postgres://u@h/d?connect_timeout=-5").contains("seconds"));
+        assert!(parse_error("postgres://u@h/d?connect_timeout=1.5").contains("seconds"));
+        assert!(
+            parse_error("postgres://u@h/d?connect_timeout=99999999999999999999")
+                .contains("seconds")
+        );
+        assert_eq!(
+            parse("postgres://u@h/d?connect_timeout=1")
+                .0
+                .connect_timeout,
+            Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn unix_socket_addresses_are_refused_clearly() {
+        // A socket directory written the way libpq URLs do it, percent-encoded
+        // in the host position, or given as an option.
+        for url in [
+            "postgres://u@%2Fvar%2Frun%2Fpostgresql/d",
+            "postgres://u@/d?host=/var/run/postgresql",
+            "postgres://u@h/d?host=/tmp",
+        ] {
+            assert!(
+                parse_error(url).to_lowercase().contains("unix socket")
+                    || parse_error(url).contains("host"),
+                "{url}"
+            );
+        }
+        // The first form must say so by name, not fail later as an unknown host.
+        assert!(
+            parse_error("postgres://u@%2Fvar%2Frun%2Fpostgresql/d")
+                .contains("Unix sockets are not supported")
+        );
     }
 }

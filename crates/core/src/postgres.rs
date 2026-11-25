@@ -21,6 +21,7 @@ use sqlx::postgres::{
 use sqlx::{Column as _, Connection, Either, Executor as _, Row, TypeInfo, ValueRef};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{Mutex, MutexGuard, mpsc};
+use tokio::task::JoinHandle;
 use tracing::instrument::WithSubscriber as _;
 
 use crate::connection::{ConnectionConfig, TlsMode};
@@ -83,6 +84,10 @@ pub struct PostgresDriver {
     /// Tables seen in results (by table number), with their column names, so
     /// a result column can be traced back to `schema.table.column`.
     relations: StdMutex<HashMap<u32, Relation>>,
+    /// A cancel sent because a query's future was dropped before it finished
+    /// (see `AbandonedQuery`). The next query waits for it, so the cancel can
+    /// never land on that next query by mistake.
+    pending_cancel: StdMutex<Option<JoinHandle<()>>>,
 }
 
 /// Exclusive use of the introspection connection (see `PostgresDriver::meta`).
@@ -131,6 +136,7 @@ impl PostgresDriver {
             meta: Mutex::new(None),
             type_names: StdMutex::new(HashMap::new()),
             relations: StdMutex::new(HashMap::new()),
+            pending_cancel: StdMutex::new(None),
         })
     }
 
@@ -327,7 +333,40 @@ impl PostgresDriver {
         mut notices: UnboundedReceiver<Notice>,
     ) -> Result<QuerySummary, DriverError> {
         let mut conn = self.conn.lock().await;
+        // If an earlier query on this connection was abandoned, its cancel is
+        // on its way. Wait until the server has received it before sending
+        // anything new, so the cancel cannot hit this query.
+        let earlier_cancel = self
+            .pending_cancel
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(task) = earlier_cancel {
+            let _ = task.await;
+            // The abandoned query's answer is still on the wire and ends with
+            // the server's "cancelled" error. Reading it is the connection's
+            // first job, and a `ping` takes it (we ignore the result), so the
+            // error cannot show up as the answer to the user's new query.
+            let _ = conn.ping().await;
+        }
         self.busy.store(true, Ordering::SeqCst);
+        // From here until the query ends, the server is working for us. If
+        // this future is dropped meanwhile (a closed tab, a `timeout` that
+        // fired), the guard tells the server to stop.
+        let mut abandon_guard = AbandonedQuery {
+            driver: self,
+            armed: true,
+        };
+        // Forget table names learned during earlier runs. A table keeps its id
+        // when it is renamed, moved to another schema or given a new column,
+        // so a remembered name would go stale and the editor would aim its
+        // UPDATE at the wrong place. We cannot tell when that happens without
+        // reading the user's SQL (which we never do), so we simply look again
+        // once per run. Several statements in one run still share one lookup.
+        self.relations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
         // `fetch_many` yields two kinds of item, in order: rows (`Right`) and,
         // after each statement finishes, that statement's summary (`Left`).
         // The SQL may hold several statements, so there can be several result sets.
@@ -344,6 +383,9 @@ impl PostgresDriver {
             let _ = self.cancel().await;
             while stream.next().await.is_some() {}
         }
+        // The server is done with this query (finished, failed or cancelled),
+        // so there is nothing left to clean up if we are dropped from here on.
+        abandon_guard.armed = false;
         // A statement that returned no rows never told us its columns (the
         // server only describes them alongside the first row). If the whole
         // run returned nothing and changed nothing, it may have been a SELECT
@@ -632,25 +674,19 @@ impl Driver for PostgresDriver {
             // query instead (Postgres cancels "whatever runs right now").
             return Ok(());
         }
-        // The main connection is busy, so open a second one just for this.
-        let mut other = open_connection(&self.options, self.connect_timeout).await?;
-        sqlx::query("SELECT pg_cancel_backend($1)")
-            .bind(self.backend_pid)
-            .execute(&mut other)
-            .await
-            .map_err(server_error)?;
-        // Closing politely is optional; the server notices when we drop it.
-        let _ = other.close().await;
-        Ok(())
+        send_cancel(&self.options, self.connect_timeout, self.backend_pid).await
     }
 
     async fn list_databases(&self) -> Result<Vec<String>, DriverError> {
         let mut meta = self.meta().await?;
         let conn = meta.conn()?;
-        // Skip the template databases and any that refuse connections.
+        // Skip the template databases, any that refuse connections, and any
+        // this user has no CONNECT privilege on (they could not open it anyway).
         sqlx::query_scalar(
             "SELECT datname::text FROM pg_database \
-             WHERE NOT datistemplate AND datallowconn ORDER BY datname",
+             WHERE NOT datistemplate AND datallowconn \
+               AND has_database_privilege(datname, 'CONNECT') \
+             ORDER BY datname",
         )
         .fetch_all(&mut *conn)
         .await
@@ -739,13 +775,16 @@ impl Driver for PostgresDriver {
         // Indexes (the primary key is just an index with indisprimary = true).
         // `indkey` lists the column numbers; we look their names up in order.
         // Number 0 means an expression, which has no plain column name.
+        // `indnkeyatts` is how many leading entries are real key columns; the
+        // rest are `INCLUDE` columns, which are stored in the index but are not
+        // part of what it sorts or keeps unique, so we leave them out.
         let indexes: Vec<IndexRow> =
             sqlx::query_as(&format!(
                 "SELECT i.relname::text, \
                         COALESCE((SELECT array_agg(a.attname::text ORDER BY k.ord) \
                                   FROM unnest(ix.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) \
                                   JOIN pg_attribute a ON a.attrelid = ix.indrelid AND a.attnum = k.attnum \
-                                  WHERE k.attnum > 0), ARRAY[]::text[]), \
+                                  WHERE k.attnum > 0 AND k.ord <= ix.indnkeyatts), ARRAY[]::text[]), \
                         ix.indisunique, ix.indisprimary, am.amname::text, \
                         pg_get_indexdef(ix.indexrelid) \
                  FROM pg_index ix \
@@ -907,6 +946,66 @@ fn connect_options(
 }
 
 /// Connect, giving up after `timeout` instead of hanging on an unreachable host.
+/// Ask the server to stop whatever the connection with this id is running.
+/// The main connection is busy with that very query, so this opens a second
+/// one just to send the request.
+async fn send_cancel(
+    options: &PgConnectOptions,
+    timeout: Duration,
+    backend_pid: i32,
+) -> Result<(), DriverError> {
+    let mut other = open_connection(options, timeout).await?;
+    sqlx::query("SELECT pg_cancel_backend($1)")
+        .bind(backend_pid)
+        .execute(&mut other)
+        .await
+        .map_err(server_error)?;
+    // Closing politely is optional; the server notices when we drop it.
+    let _ = other.close().await;
+    Ok(())
+}
+
+/// A tripwire for a query whose future is thrown away before it ends.
+///
+/// In async Rust, dropping a future simply stops it where it is. For a query
+/// that means we stop *reading*, but the server keeps working (and keeps
+/// holding locks), and the next query on this connection would have to wait
+/// for all of that to finish. Rust runs `Drop` in this situation, so we use it
+/// to send a cancel. `Drop` cannot wait (it is not async), so the cancel goes
+/// out from a background task and the next query waits for that task.
+struct AbandonedQuery<'a> {
+    driver: &'a PostgresDriver,
+    /// True while the server is running our query. Switched off once the
+    /// query has ended normally, because then there is nothing to cancel.
+    armed: bool,
+}
+
+impl Drop for AbandonedQuery<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let driver = self.driver;
+        driver.busy.store(false, Ordering::SeqCst);
+        // Outside a Tokio runtime (for example while the program is shutting
+        // down) there is nobody to run the cancel; the server will notice the
+        // closed connection by itself.
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let options = driver.options.clone();
+        let (timeout, pid) = (driver.connect_timeout, driver.backend_pid);
+        let task = runtime.spawn(async move {
+            // Best effort: if this fails the server finishes the query alone.
+            let _ = send_cancel(&options, timeout, pid).await;
+        });
+        *driver
+            .pending_cancel
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(task);
+    }
+}
+
 async fn open_connection(
     options: &PgConnectOptions,
     timeout: Duration,

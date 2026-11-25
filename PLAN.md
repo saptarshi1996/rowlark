@@ -169,7 +169,9 @@ Hardening found by testing (all fixed, each with a test): rows already read were
 
 Measured: 1,000,000 rows stream in about 1.9 s (about 535,000 rows/s) on an Apple Silicon laptop against a local Docker Postgres, never more than 1,000 rows held at a time; a slow reader makes the driver wait instead of buffering. `COPY ... TO STDOUT` is not supported (a different wire protocol) but does not hang or break the connection.
 
-Test status: 107 tests, about 97% line coverage. What is left uncovered is defensive code that cannot be triggered (impossible index checks, binary-format guard, tracing boilerplate). CI fails below 95%.
+Second round of edge-case tests (2026-11-25), which found and fixed six more bugs, each test-first: (1) a stale cache made column origins keep the old table and column names after a rename, a schema move or an added column, so an edit could have aimed at the wrong place (origins are now looked up once per run); (2) when the task running a query was dropped mid-query (closed tab, a `timeout` firing), the server kept working and the next query on that connection waited for it, and then reported `Cancelled` by mistake (the driver now cancels on drop, and the next query waits for that cancel and absorbs its error); (3) `INCLUDE` columns of an index were listed as key columns; (4) `list_databases` showed databases the user cannot connect to; (5) a repeated URL option (`sslmode=require&sslmode=disable`) silently let the last one win, now an error; (6) `connect_timeout=0` and a percent-encoded Unix socket host gave confusing failures, now clear errors. Known quirks pinned by tests, not bugs: an array of a domain gives its elements as `Unknown` (exact text kept), and expression indexes list only their real columns (the full definition is kept).
+
+Test status: 165 tests, about 97% line coverage. What is left uncovered is defensive code that cannot be triggered (impossible index checks, binary-format guard, tracing boilerplate). CI fails below 95%.
 
 Still not done for Postgres (deliberately): Unix-socket connections, automatic reconnect, SSH tunnels (Phase 1b, shared with MySQL), and `LISTEN/NOTIFY`.
 

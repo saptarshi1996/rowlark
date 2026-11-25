@@ -17,7 +17,7 @@ thiserror = "2"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "tls-rustls-ring-native-roots"] }
 # Async runtime pieces used directly: channels (`mpsc`), an async `Mutex`, and
 # `timeout` for connecting.
-tokio = { version = "1", features = ["sync", "time"] }
+tokio = { version = "1", features = ["sync", "time", "rt"] }
 # Reading `postgres://` URLs (both already come with sqlx, so no extra build cost).
 url = "2"
 percent-encoding = "2"
