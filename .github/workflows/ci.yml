@@ -59,6 +59,7 @@ jobs:
         run: >
           docker compose up -d --wait
           postgres14 postgres15 postgres16 postgres17 postgres16tls
+          mysql8 mysql9 mariadb
 
       - name: Run all tests, including the database tests, with coverage
         run: >

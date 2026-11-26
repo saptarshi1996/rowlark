@@ -8,9 +8,11 @@
 //! - `driver`: the `Driver` trait and the types it uses.
 //! - `schema`: the normalized model of a database's structure (tables, columns...).
 //! - `postgres`: the PostgreSQL driver.
+//! - `mysql`: the MySQL and MariaDB driver (in progress).
 
 pub mod connection;
 pub mod driver;
+pub mod mysql;
 pub mod postgres;
 pub mod schema;
 pub mod value;
@@ -20,6 +22,7 @@ pub use driver::{
     Column, ColumnOrigin, Driver, DriverError, Flavor, Notice, NoticeSeverity, QueryEvent,
     QuerySummary, ServerInfo, TransactionState,
 };
+pub use mysql::MySqlDriver;
 pub use postgres::PostgresDriver;
 pub use schema::{ColumnInfo, ForeignKeyInfo, IndexInfo, TableDetails, TableInfo, TableKind};
 pub use value::Value;

@@ -150,6 +150,9 @@ Code signing/notarization (macOS), then Windows and Linux packages, auto-update,
 - [x] Postgres arrays (`Value::Array`, nested, NULLs, quoting) and real names for custom types (enums etc.), tested on Postgres 14–17
 - [x] Finish Postgres completely (owner's call, 2026-11-24) before touching MySQL/MariaDB: see "Postgres: done" below
 - [ ] Then the MySQL/MariaDB driver with the same tests (re-check the introspection names and shapes against MySQL: "schema" vs "database")
+  - [x] Part 1: connect, `ping`, flavor detection (MySQL vs MariaDB), TLS mode mapping (`crates/core/src/mysql.rs`)
+  - [x] Part 2: value conversion with golden tests on MySQL 8, MySQL 9 and MariaDB (a basic streamed `run_query` is in too, because the tests need it)
+  - [ ] Parts 3-7: finish streaming (transactions), cancel and notices, introspection, column origins and empty-result headers, TLS tests and `mysql://` URLs. Then move the methods into `impl Driver for MySqlDriver`
 - [ ] Remaining Phase 1: connection model + keychain (UI after)
 - [ ] Phase 0b UI spike
 
@@ -174,6 +177,14 @@ Second round of edge-case tests (2026-11-25), which found and fixed six more bug
 Test status: 165 tests, about 97% line coverage. What is left uncovered is defensive code that cannot be triggered (impossible index checks, binary-format guard, tracing boilerplate). CI fails below 95%.
 
 Still not done for Postgres (deliberately): Unix-socket connections, automatic reconnect, SSH tunnels (Phase 1b, shared with MySQL), and `LISTEN/NOTIFY`.
+
+### MySQL / MariaDB: findings so far (2026-11-27)
+
+- sqlx changes the session in ways a client that runs the user's SQL must not. We switch off `PIPES_AS_CONCAT`, `NO_ENGINE_SUBSTITUTION`, the forced `time_zone = '+00:00'` and its fixed collation (we run `SET NAMES utf8mb4` ourselves, so the server's default collation applies), and we take `IGNORE_SPACE` back out of `sql_mode` after connecting (sqlx always sends that client flag, which would make names like `count` unusable). Tests check the session equals the server's defaults.
+- Text with a `_bin` collation (and MariaDB's `JSON`, which is `LONGTEXT ... _bin`) is flagged binary by the server, and sqlx does not pass on the charset that would tell it from real binary. We decide by value: valid UTF-8 without control characters is `Text`, anything else is `Bytes`. Cost: a blob holding plain readable text shows as text (the type name still says BLOB). `BIT` and `GEOMETRY` are always `Bytes`.
+- Known limits, each pinned by a test so a fix shows up: sqlx reports rows *matched* (not *changed*) by `UPDATE` (`FOUND_ROWS` flag); MySQL 9 `VECTOR` columns make the whole query fail ("unknown column type 0xf2"; `VECTOR_TO_STRING(col)` works).
+- MySQL's `JSON` text is normalised by the server (keys sorted); MariaDB keeps the text as typed. `YEAR` stays `Unknown` text (`0000` as a number would be written back as 2000). Floats must be written back in exponent form (`1.8e308`): a long run of digits is read as an exact `DECIMAL`, which stops at 65 digits. The edit-SQL code must follow this.
+- `cargo audit` flags `rsa` 0.9.10 (RUSTSEC-2023-0071, Marvin timing attack), pulled in by `sqlx-mysql` for password encryption. No patched release exists. sqlx only uses it to *encrypt* the password with the server's public key, not to decrypt, so the attack does not apply, but the CI audit job needs an explicit decision (ignore with this reason, or other).
 
 ## 11. Open questions
 

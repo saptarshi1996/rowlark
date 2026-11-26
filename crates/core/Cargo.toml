@@ -14,7 +14,7 @@ thiserror = "2"
 # not support yet. `tls-rustls-ring-native-roots` adds TLS (rustls) and makes it
 # trust the operating system's certificate authorities, so verified TLS works
 # against public cloud databases without extra files.
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "tls-rustls-ring-native-roots"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "mysql", "tls-rustls-ring-native-roots"] }
 # Async runtime pieces used directly: channels (`mpsc`), an async `Mutex`, and
 # `timeout` for connecting.
 tokio = { version = "1", features = ["sync", "time", "rt"] }
