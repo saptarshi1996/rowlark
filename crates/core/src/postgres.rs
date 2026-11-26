@@ -1277,6 +1277,59 @@ mod tests {
     use super::*;
     use crate::connection::TlsConfig;
 
+    /// Fire one event with sqlx's notice target at each level and check the
+    /// severity mapping. Also covers a `message` given as a plain string, and
+    /// the span methods the `Subscriber` trait forces us to have.
+    #[test]
+    fn notice_collector_maps_levels_and_reads_messages() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let dispatch = tracing::Dispatch::new(NoticeCollector { tx });
+        tracing::dispatcher::with_default(&dispatch, || {
+            tracing::event!(target: "sqlx::postgres::notice", tracing::Level::ERROR, "e");
+            tracing::event!(target: "sqlx::postgres::notice", tracing::Level::WARN, "w");
+            tracing::event!(target: "sqlx::postgres::notice", tracing::Level::INFO, "i");
+            tracing::event!(target: "sqlx::postgres::notice", tracing::Level::DEBUG, "d");
+            tracing::event!(target: "sqlx::postgres::notice", tracing::Level::TRACE, "t");
+            // A plain string field goes through `record_str`.
+            tracing::event!(target: "sqlx::postgres::notice", tracing::Level::INFO, message = "s");
+            // Other targets are ignored.
+            tracing::event!(target: "something::else", tracing::Level::ERROR, "ignored");
+            // Spans are unused but must not break anything.
+            let span =
+                tracing::span!(target: "sqlx::postgres::notice", tracing::Level::INFO, "x", a = 1);
+            let other = tracing::span!(target: "sqlx::postgres::notice", tracing::Level::INFO, "y");
+            span.follows_from(&other);
+            span.record("a", 2);
+            let _entered = span.enter();
+        });
+        let mut got = Vec::new();
+        while let Ok(n) = rx.try_recv() {
+            got.push((n.severity, n.message));
+        }
+        assert_eq!(
+            got,
+            vec![
+                (NoticeSeverity::Error, "e".to_string()),
+                (NoticeSeverity::Warning, "w".to_string()),
+                (NoticeSeverity::Notice, "i".to_string()),
+                (NoticeSeverity::Debug, "d".to_string()),
+                (NoticeSeverity::Info, "t".to_string()),
+                (NoticeSeverity::Notice, "s".to_string()),
+            ]
+        );
+    }
+
+    /// The introspection connection is always opened before use; if it were
+    /// somehow missing we want an error, not a panic.
+    #[test]
+    fn meta_without_a_connection_is_an_error() {
+        let slot: Mutex<Option<PgConnection>> = Mutex::new(None);
+        let mut meta = Meta {
+            guard: slot.try_lock().expect("fresh mutex is free"),
+        };
+        assert!(matches!(meta.conn(), Err(DriverError::Connection(_))));
+    }
+
     #[test]
     fn integers_parse_and_keep_all_64_bits() {
         assert_eq!(text_to_value("INT4", "-42"), Value::Int(-42));
