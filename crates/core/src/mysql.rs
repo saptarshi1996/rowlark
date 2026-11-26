@@ -20,12 +20,16 @@
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use sqlx::mysql::{MySqlConnectOptions, MySqlConnection, MySqlRow, MySqlSslMode};
+use sqlx::mysql::{
+    MySqlConnectOptions, MySqlConnection, MySqlDatabaseError, MySqlRow, MySqlSslMode,
+};
 use sqlx::{Column as _, Connection, Either, Executor as _, Row, TypeInfo};
 use tokio::sync::{Mutex, mpsc};
 
 use crate::connection::{ConnectionConfig, TlsMode};
-use crate::driver::{Column, DriverError, Flavor, QueryEvent, QuerySummary, ServerInfo};
+use crate::driver::{
+    Column, DriverError, Flavor, QueryEvent, QuerySummary, ServerInfo, TransactionState,
+};
 use crate::value::Value;
 
 /// How many rows we send to the UI at a time.
@@ -77,6 +81,46 @@ impl MySqlDriver {
             flavor: self.flavor,
             version: self.version.clone(),
         })
+    }
+
+    /// Whether a transaction is open on this connection.
+    ///
+    /// Asks the server, so it also notices a `BEGIN` the user typed and one
+    /// that a statement like `CREATE TABLE` ended without being asked. Returns
+    /// `Busy` straight away while a query is running.
+    ///
+    /// MySQL never has Postgres's "aborted" state: after an error the
+    /// transaction stays open and usable, so `Aborted` is never returned.
+    ///
+    /// How it asks: MySQL has no variable that says "a transaction is open",
+    /// and the tables that do need privileges an ordinary user lacks. What
+    /// every user can do is this: `RELEASE SAVEPOINT` of a savepoint we just
+    /// made works inside a transaction, and fails with error 1305 ("does not
+    /// exist") outside one, because with autocommit on there is nothing for
+    /// the savepoint to live in. The savepoint is gone again right after, and
+    /// it has a name no one else would use. One known quirk, pinned by a test:
+    /// with `autocommit` OFF the savepoint itself opens MySQL's implicit
+    /// transaction, so the answer is `Open` even straight after a `COMMIT`.
+    /// (Such a session opens one at its next statement anyway, and a bare
+    /// savepoint holds no locks.)
+    pub async fn transaction_state(&self) -> Result<TransactionState, DriverError> {
+        // If a query holds the connection, we cannot ask. Do not wait for it.
+        let Ok(mut conn) = self.conn.try_lock() else {
+            return Ok(TransactionState::Busy);
+        };
+        let mut stream =
+            sqlx::raw_sql("SAVEPOINT rowlark_tx_probe; RELEASE SAVEPOINT rowlark_tx_probe")
+                .fetch_many(&mut *conn);
+        while let Some(item) = stream.next().await {
+            if let Err(error) = item {
+                return if is_missing_savepoint(&error) {
+                    Ok(TransactionState::Idle)
+                } else {
+                    Err(server_error(error))
+                };
+            }
+        }
+        Ok(TransactionState::Open)
     }
 
     /// Run `sql` and stream its results into `tx` in batches of up to 1,000
@@ -143,6 +187,17 @@ impl MySqlDriver {
         }
         Ok(summary)
     }
+}
+
+/// Is this MySQL's error 1305, "SAVEPOINT ... does not exist"? We look at the
+/// error *number*, not the SQLSTATE: its SQLSTATE (42000) is shared with
+/// ordinary syntax errors, so it cannot tell them apart.
+fn is_missing_savepoint(error: &sqlx::Error) -> bool {
+    let sqlx::Error::Database(db) = error else {
+        return false;
+    };
+    db.try_downcast_ref::<MySqlDatabaseError>()
+        .is_some_and(|e| e.number() == 1305)
 }
 
 /// sqlx always tells the server "ignore space after function names" (the
